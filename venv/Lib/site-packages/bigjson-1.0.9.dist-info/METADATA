@@ -1,0 +1,13 @@
+Metadata-Version: 2.1
+Name: bigjson
+Version: 1.0.9
+Summary: Python library that reads JSON files of any size.
+Home-page: https://henu.fi/bigjson
+Author: Henrik Heino
+Author-email: henrik.heino@gmail.com
+License: MIT
+Platform: UNKNOWN
+
+UNKNOWN
+
+

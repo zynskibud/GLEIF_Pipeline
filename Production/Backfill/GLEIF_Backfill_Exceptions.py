@@ -41,9 +41,23 @@ class GLEIF_Reporting_Exceptions_Data:
             id SERIAL PRIMARY KEY,
             lei TEXT NOT NULL,
             ExceptionCategory TEXT,
-            ExceptionReason Text
+            ExceptionReason Text,
+            UNIQUE (lei, ExceptionCategory, ExceptionReason)
             );
         """)
+    
+    def drop_table(self , lst_table_names):
+            """
+            Drops a specific table from the database securely.
+            
+            Parameters:
+                table_name (list of string): The names of the tables to drop.
+            """
+
+            for table_name in lst_table_names:
+                self.cursor.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
+                
+            self.conn.commit()
     
     def bulk_insert_using_copy(self , table_name , columns, data):
         """Perform a bulk insert using PostgreSQL COPY with an in-memory buffer
@@ -74,8 +88,9 @@ class GLEIF_Reporting_Exceptions_Data:
             dict_flat = self.obj_backfill_helpers.flatten_dict(dict_input = dict)
             tuple_values = self.obj_backfill_helpers.get_target_values(dict_data = dict_flat , subset_string = True , target_keys = ["LEI" , "ExceptionCategory" , "ExceptionReason"])
             list_tuples_exceptions.append(tuple(tuple_values))
-            
-        self.bulk_insert_using_copy(data = list_tuples_exceptions , table_name = "GLEIF_exception_data" , columns = ['lei' , 'ExceptionCategory' , 'ExceptionReason'])
+        
+        list_clean_tuples_exceptions = list(set(list_tuples_exceptions))
+        self.bulk_insert_using_copy(data = list_clean_tuples_exceptions , table_name = "GLEIF_exception_data" , columns = ['lei' , 'ExceptionCategory' , 'ExceptionReason'])
             
     def storing_GLEIF_data_in_database(self):
         self.create_table()

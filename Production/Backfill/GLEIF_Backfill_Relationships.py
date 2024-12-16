@@ -1,13 +1,18 @@
 import os
+
 import logging
 import json
-import json
 import psycopg2
-import GLEIF_Backfill_Helpers
 import io
+import sys
+current_directory = os.getcwd()
+target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
+sys.path.append(target_directory)
+
+from Production.Backfill import GLEIF_Backfill_Helpers
 
 class GLEIFLevel2Data:
-    def __init__(self , bool_log = True , str_db_name = "GLEIF_db" , bool_downloaded = True):
+    def __init__(self , bool_log = True , str_db_name = "GLEIF_test_db" , bool_downloaded = True):
         self.obj_backfill_helpers = GLEIF_Backfill_Helpers.GLEIF_Backill_Helpers(bool_Level_2_Trees = True)
         if bool_log:
             logging_folder = "../logging"  # Adjust the folder path as necessary
@@ -37,9 +42,9 @@ class GLEIFLevel2Data:
         self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS GLEIF_relationship_data (
                 id SERIAL PRIMARY KEY,
-                StartNode TEXT,                
-                EndNode TEXT,
-                RelationshipType TEXT,
+                StartNode TEXT NOT NULL,
+                EndNode TEXT NOT NULL,
+                RelationshipType TEXT NOT NULL,
                 RelationshipStatus TEXT,
                 RegistrationStatus TEXT,
                 InitialRegistrationDate TEXT,
@@ -48,43 +53,69 @@ class GLEIFLevel2Data:
                 ManagingLOU TEXT,
                 ValidationSources TEXT,
                 ValidationDocuments TEXT,
-                ValidationReference TEXT
+                ValidationReference TEXT,
+                UNIQUE (StartNode, EndNode, RelationshipType)
                 );
             """)
             
         self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS GLEIF_relationship_date_data (
                 id SERIAL PRIMARY KEY,
-                relationship_id INTEGER NOT NULL,
+                StartNode TEXT NOT NULL,
+                EndNode TEXT NOT NULL,
+                RelationshipType TEXT NOT NULL,
                 StartDate TEXT,
                 EndDate TEXT,
                 PeriodType TEXT,
-                FOREIGN KEY (relationship_id) REFERENCES GLEIF_relationship_data(id)
+                FOREIGN KEY (StartNode, EndNode, RelationshipType) 
+                    REFERENCES GLEIF_relationship_data(StartNode, EndNode, RelationshipType),
+                UNIQUE (StartNode, EndNode, RelationshipType, StartDate, PeriodType)
                 );
             """)
         
         self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS GLEIF_relationship_qualifiers (
                 id SERIAL PRIMARY KEY,
-                relationship_id INTEGER NOT NULL,
+                StartNode TEXT NOT NULL,
+                EndNode TEXT NOT NULL,
+                RelationshipType TEXT NOT NULL,                
                 QualifierDimension TEXT,                
                 QualifierCategory TEXT,
-                FOREIGN KEY (relationship_id) REFERENCES GLEIF_relationship_data(id)
+                FOREIGN KEY (StartNode, EndNode, RelationshipType) 
+                    REFERENCES GLEIF_relationship_data(StartNode, EndNode, RelationshipType),
+                UNIQUE (StartNode, EndNode, RelationshipType , QualifierDimension , QualifierCategory)                
                 );
             """)
         
         self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS GLEIF_relationship_quantifiers (
                 id SERIAL PRIMARY KEY,
-                relationship_id INTEGER NOT NULL,
+                StartNode TEXT NOT NULL,
+                EndNode TEXT NOT NULL,
+                RelationshipType TEXT NOT NULL,               
                 MeasurementMethod TEXT,                
                 QuantifierAmount TEXT,
                 QuantifierUnits TEXT,
-                FOREIGN KEY (relationship_id) REFERENCES GLEIF_relationship_data(id)
+                FOREIGN KEY (StartNode, EndNode, RelationshipType) 
+                    REFERENCES GLEIF_relationship_data(StartNode, EndNode, RelationshipType),
+                UNIQUE (StartNode, EndNode, RelationshipType, MeasurementMethod, QuantifierAmount, QuantifierUnits)                
                 );
             """)
         
         self.conn.commit()
+    
+    def drop_table(self , lst_table_names):
+            """
+            Drops a specific table from the database securely.
+            
+            Parameters:
+                table_name (list of string): The names of the tables to drop.
+            """
+
+            for table_name in lst_table_names:
+                self.cursor.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
+                
+            self.conn.commit()
     
     def bulk_insert_using_copy(self , table_name , columns, data):
         """Perform a bulk insert using PostgreSQL COPY with an in-memory buffer
@@ -137,93 +168,113 @@ class GLEIFLevel2Data:
             list_clean_output = self.clean_url(list_input = list_output)
             list_tuples_relationships.append(tuple(list_clean_output))
         
-        return list_tuples_relationships
-    
+        list_clean_tuples_relationships = list(set(list_tuples_relationships))
+        
+        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_data" , 
+                                            data = list_clean_tuples_relationships , 
+                                            columns = [
+                                                        'StartNode',
+                                                        'EndNode',
+                                                        'RelationshipType',
+                                                        'RelationshipStatus',
+                                                        'RegistrationStatus',
+                                                        'InitialRegistrationDate',
+                                                        'LastUpdateDate',
+                                                        'NextRenewalDate',
+                                                        'ManagingLOU',
+                                                        'ValidationSources',
+                                                        'ValidationDocuments',
+                                                        'ValidationReference'
+                                                    ])      
+        
     def process_relationships_date_data(self , dict_relationships):
         list_relationship_date_data = []
         
-        for index, dict_relationship in enumerate(dict_relationships):
+        for dict_relationship in dict_relationships:
             dict_flat = self.obj_backfill_helpers.flatten_dict(dict_input = dict_relationship)
             list_tuples_dates = self.obj_backfill_helpers.extract_event_data(dict_data = dict_flat , base_keyword = "RelationshipPeriods_RelationshipPeriod" , target_keys = ["StartDate" , "EndDate" , "PeriodType"])
             
-            list_tuples_with_index = [(index + 1, *tup) for tup in list_tuples_dates]
+            list_unique_keys = self.obj_backfill_helpers.get_target_values(dict_data = dict_flat, subset_string = True, target_keys = ["StartNode" , "EndNode" , "RelationshipType"])
+            
+            list_tuples_with_keys = [(*list_unique_keys, *tup) for tup in list_tuples_dates]
             
             # Append the result to the main list
-            list_relationship_date_data.extend(list_tuples_with_index)
-            
-        return list_relationship_date_data
+            list_relationship_date_data.extend(list_tuples_with_keys)
         
+        list_clean_relationship_date_data = list(set(list_relationship_date_data))
+
+        
+        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_date_data" , 
+                                    data = list_clean_relationship_date_data , 
+                                    columns = [
+                                        'StartNode',
+                                        'EndNode',
+                                        'RelationshipType',                                        
+                                        "StartDate",
+                                        "EndDate",
+                                        "PeriodType"])
+                
     def process_relationships_qualifiers(self , dict_relationships):
         list_qualifier_data = []
             
-        for index, dict_relationship in enumerate(dict_relationships):
+        for dict_relationship in dict_relationships:
             dict_flat = self.obj_backfill_helpers.flatten_dict(dict_input = dict_relationship)
             list_tuples_qualifiers = self.obj_backfill_helpers.extract_event_data(dict_data = dict_flat , base_keyword = "RelationshipQualifiers_RelationshipQualifier" , target_keys = ["QualifierDimension" , "QualifierCategory"])
             
-            list_tuples_with_index = [(index + 1, *tup) for tup in list_tuples_qualifiers]
+            list_unique_keys = self.obj_backfill_helpers.get_target_values(dict_data = dict_flat, subset_string = True, target_keys = ["StartNode" , "EndNode" , "RelationshipType"])
+            
+            list_tuples_with_keys = [(*list_unique_keys, *tup) for tup in list_tuples_qualifiers]
             
             # Append the result to the main list
-            list_qualifier_data.extend(list_tuples_with_index)
+            list_qualifier_data.extend(list_tuples_with_keys)
         
-        return list_qualifier_data
+        list_clean_qualifier_data = list(set(list_qualifier_data))
+        
+        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_qualifiers" , data = list_clean_qualifier_data , 
+                                    columns = [
+                                        'StartNode',
+                                        'EndNode',
+                                        'RelationshipType',
+                                        "QualifierDimension",                
+                                        "QualifierCategory"
+                                    ])
     
     def process_relationships_quantifiers(self , dict_relationships):
         list_quantifier_data = []
             
-        for index, dict_relationship in enumerate(dict_relationships):
+        for dict_relationship in dict_relationships:
             dict_flat = self.obj_backfill_helpers.flatten_dict(dict_input = dict_relationship)
             list_tuples_quantifiers = self.obj_backfill_helpers.extract_event_data(dict_data = dict_flat , base_keyword = "Relationship_RelationshipQuantifiers" , target_keys = ["MeasurementMethod" , "QuantifierAmount" , "QuantifierUnits"])
             
-            list_tuples_with_index = [(index + 1, *tup) for tup in list_tuples_quantifiers]
+            list_unique_keys = self.obj_backfill_helpers.get_target_values(dict_data = dict_flat, subset_string = True, target_keys = ["StartNode" , "EndNode" , "RelationshipType"])
+            
+            list_tuples_with_keys = [(*list_unique_keys, *tup) for tup in list_tuples_quantifiers]
             
             # Append the result to the main list
-            list_quantifier_data.extend(list_tuples_with_index)
+            list_quantifier_data.extend(list_tuples_with_keys)
             
-        return list_quantifier_data
-    
-    
-    def process_relationships(self , dict_relationships):
-
-        list_tuples_relationship_meta_data = self.process_meta_data(dict_relationships = dict_relationships)
-        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_data" , 
-                                    data = list_tuples_relationship_meta_data , 
+        list_clean_quantifier_data = list(set(list_quantifier_data))
+        
+        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_quantifiers" , data = list_clean_quantifier_data , 
                                     columns = [
-                                                'StartNode',
-                                                'EndNode',
-                                                'RelationshipType',
-                                                'RelationshipStatus',
-                                                'RegistrationStatus',
-                                                'InitialRegistrationDate',
-                                                'LastUpdateDate',
-                                                'NextRenewalDate',
-                                                'ManagingLOU',
-                                                'ValidationSources',
-                                                'ValidationDocuments',
-                                                'ValidationReference'
-                                            ])  
-        list_relationship_date_data = self.process_relationships_date_data(dict_relationships = dict_relationships)
-        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_date_data" , 
-                                    data = list_relationship_date_data , 
-                                    columns = [
-                                        "relationship_id", 
-                                        "StartDate",
-                                        "EndDate",
-                                        "PeriodType"])
-        list_qualifier_data = self.process_relationships_qualifiers(dict_relationships = dict_relationships)
-        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_qualifiers" , data = list_qualifier_data , 
-                                    columns = [
-                                        "relationship_id",
-                                        "QualifierDimension",                
-                                        "QualifierCategory"
-                                    ])
-        list_quantifier_data = self.process_relationships_quantifiers(dict_relationships = dict_relationships)
-        self.bulk_insert_using_copy(table_name = "GLEIF_relationship_quantifiers" , data = list_quantifier_data , 
-                                    columns = [
-                                        "relationship_id",
+                                        'StartNode',
+                                        'EndNode',
+                                        'RelationshipType',
                                         "MeasurementMethod",                
                                         "QuantifierAmount",
                                         "QuantifierUnits",
-                                    ])
+                                    ])    
+    
+    def process_relationships(self , dict_relationships):
+
+        self.process_meta_data(dict_relationships = dict_relationships)
+        
+        self.process_relationships_date_data(dict_relationships = dict_relationships)
+        
+        self.process_relationships_qualifiers(dict_relationships = dict_relationships)
+        
+        self.process_relationships_quantifiers(dict_relationships = dict_relationships)
+        
             
     def storing_GLEIF_data_in_database(self):
         

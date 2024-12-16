@@ -16,8 +16,7 @@ class GLEIF_Update_Helpers:
         self.bool_Level_1 = bool_Level_1
         self.bool_Level_2_Trees = bool_Level_2_Trees
         self.bool_Level_2_Reporting_Exceptions = bool_Level_2_Reporting_Exceptions
-        
-
+    
     def download_on_machine(self):
         """
         This function uses selenium to webscrape the download link for all Level 1 Data in the GLEIF database.

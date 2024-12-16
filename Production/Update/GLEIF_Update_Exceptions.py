@@ -36,31 +36,44 @@ class GLEIFUpdateExceptions:
     
         self.str_json_file_path = '../file_lib/Exceptions_update_unpacked\\20241130-0000-gleif-goldencopy-repex-intra-day.json'
         self.conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
-        self.conn.autocommit = True
         self.cursor = self.conn.cursor()
         
-    def bulk_insert_using_copy(self , table_name , columns, data):
-        """Perform a bulk insert using PostgreSQL COPY with an in-memory buffer
-
-        Args:
-            table_name (_type_): Name of the table to insert into
-            columns (_type_): List of column names for the table
-            data (_type_): List of tuples with the data to be inserted
+    def bulk_insert_using_copy(self, table_name, columns, data):
         """
-        
+        Perform a bulk upsert using PostgreSQL COPY with a temporary table.
+        Args:
+            table_name (str): Name of the table to insert into.
+            columns (list): List of column names for the table.
+            data (list of tuples): Data to be inserted.
+        """
+        temp_table = f"{table_name}_temp"
+
+        # Step 1: Create a temporary table
+        self.cursor.execute(f"""
+            CREATE TEMP TABLE {temp_table} (LIKE {table_name} INCLUDING ALL) ON COMMIT DROP;
+        """)
+
+        # Step 2: Write data to an in-memory buffer
         buffer = io.StringIO()
-        
-        #write data to the buffer
-        
         for row in data:
-            buffer.write('\t'.join(map(str , row)) + "\n")
-        buffer.seek(0) #reset buffer position to the beginning
-        
-        #Construct the copy query
-        copy_query = f"COPY {table_name} ({', '.join(columns)}) FROM STDIN WITH DELIMITER '\t'"
-        self.cursor.copy_expert(copy_query , buffer)
-        self.conn.commit
-        
+            buffer.write('\t'.join(map(str, row)) + "\n")
+        buffer.seek(0)  # Reset buffer position to the beginning
+
+        # Step 3: Copy data into the temporary table
+        copy_query = f"COPY {temp_table} ({', '.join(columns)}) FROM STDIN WITH DELIMITER '\t'"
+        self.cursor.copy_expert(copy_query, buffer)
+
+        # Step 4: Perform the upsert from the temporary table into the main table
+        upsert_query = f"""
+            INSERT INTO {table_name} ({', '.join(columns)})
+            SELECT {', '.join(columns)} FROM {temp_table}
+            ON CONFLICT (lei, ExceptionCategory, ExceptionReason) DO NOTHING;
+        """
+        self.cursor.execute(upsert_query)
+
+        # Commit the transaction
+        self.conn.commit()
+    
     def process_data(self , dict_leis):
         list_tuples_exceptions = []
     
@@ -69,7 +82,8 @@ class GLEIFUpdateExceptions:
             tuple_values = self.obj_backfill_helpers.get_target_values(dict_data = dict_flat , subset_string = True , target_keys = ["LEI" , "ExceptionCategory" , "ExceptionReason"])
             list_tuples_exceptions.append(tuple(tuple_values))
             
-        self.bulk_insert_using_copy(data = list_tuples_exceptions , table_name = "GLEIF_exception_data" , columns = ['lei' , 'ExceptionCategory' , 'ExceptionReason'])
+        list_clean_tuples_exceptions = list(set(list_tuples_exceptions))
+        self.bulk_insert_using_copy(data=list_clean_tuples_exceptions , table_name = "GLEIF_exception_data" , columns = ['lei', 'ExceptionCategory', 'ExceptionReason'])
         
     def storing_GLEIF_data_in_database(self):
         
@@ -78,8 +92,9 @@ class GLEIFUpdateExceptions:
             
         self.process_data(dict_leis = dict_leis["exceptions"])
         
-        
+        self.conn.commit()
         self.conn.close()
+        
 
 if __name__ == "main":
     obj_gleif_reporting_exceptions = GLEIFUpdateExceptions()

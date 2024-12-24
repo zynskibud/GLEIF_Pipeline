@@ -6,6 +6,22 @@ import psycopg2
 import sys
 import io
 import re
+from datetime import datetime, timezone
+current_directory = os.getcwd()
+target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
+sys.path.append(target_directory)
+
+from Production.Update import GLEIF_Update_Helpers
+from Production.Backfill import GLEIF_Backfill_Helpers
+
+import os
+import logging
+import json
+import json
+import psycopg2
+import sys
+import io
+import re
 current_directory = os.getcwd()
 target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
 sys.path.append(target_directory)
@@ -120,6 +136,15 @@ class GLEIFUpdateLevel1:
         # Execute the upsert query
         self.cursor.execute(upsert_query)
 
+    def remove_duplicates_keep_order(self , input_list):
+        seen = set()
+        output_list = []
+        for item in input_list:
+            if item not in seen:
+                output_list.append(item)
+                seen.add(item)
+        return output_list
+
     def process_entity_data(self , list_dict_records):
         list_entity_meta_data_tuples = []
         
@@ -187,7 +212,7 @@ class GLEIFUpdateLevel1:
                 list_output[index] = (dict_clean["LEI"],) + tup         
             list_other_names_tuples.extend(list_output)
 
-        list_clean_other_names_tuples = list(set(list_other_names_tuples))
+        list_clean_other_names_tuples = self.remove_duplicates_keep_order(list_other_names_tuples)
 
         self.bulk_upsert_using_copy(
             data=list_clean_other_names_tuples,
@@ -306,7 +331,7 @@ class GLEIFUpdateLevel1:
                 list_output[index] = (dict_clean["LEI"],) + tup 
             list_legal_entity_events_tuples.extend(list_output)
 
-        list_clean_legal_entity_events_tuples = list(set(list_legal_entity_events_tuples))
+        list_clean_legal_entity_events_tuples = self.remove_duplicates_keep_order(list_legal_entity_events_tuples)
 
         self.bulk_upsert_using_copy(
             data=list_clean_legal_entity_events_tuples,
@@ -400,7 +425,7 @@ class GLEIFUpdateLevel1:
                 list_output.insert(0 , dict_clean["LEI"])
                 list_extension_data_tuples.append(tuple(list_output))
 
-        list_clean_extension_data_tuples = list(set(list_extension_data_tuples))
+        list_clean_extension_data_tuples = self.remove_duplicates_keep_order(list_extension_data_tuples)
 
         self.bulk_upsert_using_copy(
             data=list_clean_extension_data_tuples,
@@ -445,8 +470,11 @@ class GLEIFUpdateLevel1:
             self.process_all_data(list_dict_records = dict_relationships["records"])               
         self.conn.commit()
         
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_1_meta_data")
+        
         self.conn.close()
-    
+        
+        
 if __name__ == "main":
     obj = GLEIFUpdateLevel1(bool_log = True)
     obj.storing_GLEIF_data_in_database()

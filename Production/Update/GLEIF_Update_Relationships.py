@@ -1,5 +1,20 @@
 import os
 import logging
+from datetime import datetime, timezone
+import json
+import json
+import psycopg2
+import sys
+import io
+current_directory = os.getcwd()
+target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
+sys.path.append(target_directory)
+
+from Production.Update import GLEIF_Update_Helpers
+from Production.Backfill import GLEIF_Backfill_Helpers
+
+import os
+import logging
 import json
 import json
 import psycopg2
@@ -141,6 +156,15 @@ class GLEIFUpdateLevel2:
             list_input[11] = None
         return list_input
         
+    def remove_duplicates_keep_order(self , input_list):
+        seen = set()
+        output_list = []
+        for item in input_list:
+            if item not in seen:
+                output_list.append(item)
+                seen.add(item)
+        return output_list
+    
     def process_meta_data(self , dict_relationships):
         list_tuples_relationships = []
 
@@ -208,7 +232,7 @@ class GLEIFUpdateLevel2:
             # Append the result to the main list
             list_relationship_date_data.extend(list_tuples_with_keys)
         
-        list_clean_relationship_date_data = list(set(list_relationship_date_data))
+        list_clean_relationship_date_data = self.remove_duplicates_keep_order(list_relationship_date_data)
 
         
         self.bulk_upsert_using_copy(table_name = "GLEIF_relationship_date_data" , 
@@ -244,7 +268,7 @@ class GLEIFUpdateLevel2:
             # Append the result to the main list
             list_qualifier_data.extend(list_tuples_with_keys)
         
-        list_clean_qualifier_data = list(set(list_qualifier_data))
+        list_clean_qualifier_data = self.remove_duplicates_keep_order(list_qualifier_data)
         
         self.bulk_upsert_using_copy(table_name = "GLEIF_relationship_qualifiers" , data = list_clean_qualifier_data , 
                                     columns = [
@@ -272,7 +296,7 @@ class GLEIFUpdateLevel2:
             # Append the result to the main list
             list_quantifier_data.extend(list_tuples_with_keys)
             
-        list_clean_quantifier_data = list(set(list_quantifier_data))
+        list_clean_quantifier_data = self.remove_duplicates_keep_order(list_quantifier_data)
         
         self.bulk_upsert_using_copy(table_name = "GLEIF_relationship_quantifiers" , data = list_clean_quantifier_data , 
                                     columns = [
@@ -306,6 +330,8 @@ class GLEIFUpdateLevel2:
             self.process_relationships(dict_relationships = dict_relationships["relations"])               
         
         self.conn.commit()
+        
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_2_Relationships")
         
         self.conn.close()
         

@@ -31,9 +31,9 @@ class GLEIFLevel2Data:
                 
             str_level_2_download_link = self.obj_backfill_helpers.get_level_download_links()
             self.str_json_file_path = self.obj_backfill_helpers.unpacking_GLEIF_zip_files(str_download_link = str_level_2_download_link , str_unpacked_zip_file_path_name = "Level_2_unpacked" , str_zip_file_path_name = "Level_2.zip")
-    
-        str_unpacked_zip_file_name = os.listdir(rf"../file_lib/Level_2_unpacked")[0]
-        self.str_json_file_path = rf"../file_lib/Level_2_unpacked" + "//" + str_unpacked_zip_file_name
+        else:
+            str_unpacked_zip_file_name = os.listdir(rf"../file_lib/Level_2_unpacked")[-1]
+            self.str_json_file_path = rf"../file_lib/Level_2_unpacked" + "//" + str_unpacked_zip_file_name
         self.conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
@@ -159,6 +159,15 @@ class GLEIFLevel2Data:
             list_input[11] = None
         return list_input
         
+    def remove_duplicates_keep_order(self , input_list):
+        seen = set()
+        output_list = []
+        for item in input_list:
+            if item not in seen:
+                output_list.append(item)
+                seen.add(item)
+        return output_list
+    
     def process_meta_data(self , dict_relationships):
         list_tuples_relationships = []
 
@@ -168,7 +177,7 @@ class GLEIFLevel2Data:
             list_clean_output = self.clean_url(list_input = list_output)
             list_tuples_relationships.append(tuple(list_clean_output))
         
-        list_clean_tuples_relationships = list(set(list_tuples_relationships))
+        list_clean_tuples_relationships = self.remove_duplicates_keep_order(list_tuples_relationships)
         
         self.bulk_insert_using_copy(table_name = "GLEIF_relationship_data" , 
                                             data = list_clean_tuples_relationships , 
@@ -201,7 +210,7 @@ class GLEIFLevel2Data:
             # Append the result to the main list
             list_relationship_date_data.extend(list_tuples_with_keys)
         
-        list_clean_relationship_date_data = list(set(list_relationship_date_data))
+        list_clean_relationship_date_data = self.remove_duplicates_keep_order(list_relationship_date_data)
 
         
         self.bulk_insert_using_copy(table_name = "GLEIF_relationship_date_data" , 
@@ -228,7 +237,7 @@ class GLEIFLevel2Data:
             # Append the result to the main list
             list_qualifier_data.extend(list_tuples_with_keys)
         
-        list_clean_qualifier_data = list(set(list_qualifier_data))
+        list_clean_qualifier_data = self.remove_duplicates_keep_order(list_qualifier_data)
         
         self.bulk_insert_using_copy(table_name = "GLEIF_relationship_qualifiers" , data = list_clean_qualifier_data , 
                                     columns = [
@@ -253,7 +262,7 @@ class GLEIFLevel2Data:
             # Append the result to the main list
             list_quantifier_data.extend(list_tuples_with_keys)
             
-        list_clean_quantifier_data = list(set(list_quantifier_data))
+        list_clean_quantifier_data = self.remove_duplicates_keep_order(list_quantifier_data)
         
         self.bulk_insert_using_copy(table_name = "GLEIF_relationship_quantifiers" , data = list_clean_quantifier_data , 
                                     columns = [
@@ -283,6 +292,8 @@ class GLEIFLevel2Data:
         with open(self.str_json_file_path, 'r', encoding='utf-8') as file:
             dict_relationships = json.load(file)            
             self.process_relationships(dict_relationships = dict_relationships["relations"])               
+        
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_2_Relationships")
         
         self.conn.close()
         

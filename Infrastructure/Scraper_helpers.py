@@ -54,7 +54,7 @@ class Scraper_Helpers:
             return False
     
     def spotty_network(self , url , wait_time = 1 , number_retries = 2 , proxies = None , 
-                       acceptable_status_codes = None , download_size = False):
+                       acceptable_status_codes = None , download_size = False , stream = False):
         """
         Specifically this needs to be used for cable internet. 
 
@@ -73,14 +73,15 @@ class Scraper_Helpers:
         while attempt_num != number_retries: 
             try:
                 if proxies: #if the request needs to be done with headers and proxies
-                    response = self.session_obj.get(url , headers = self.headers , proxies = proxies) 
+                    response = self.session_obj.get(url , headers = self.headers , proxies = proxies , stream = stream) 
                 else: #if the request is with neither
-                    response = self.session_obj.get(url , headers = self.headers)
+                    response = self.session_obj.get(url , headers = self.headers , stream = stream)
 
                 if acceptable_status_codes and response.status_code in acceptable_status_codes: #if the user did pass a status code list, make sure this is one of the ones they are looking for
                     if download_size:
-                        self.get_obj_size(response)                   
-                    return response
+                        self.get_obj_size(response)
+                    else:
+                        return response
                 
                 elif not acceptable_status_codes: #if the user didnt pass any status codes they want to recieve, just return whatever the response object is
                     if download_size:
@@ -89,7 +90,10 @@ class Scraper_Helpers:
                 
                 elif self.log:
                     logging.error(f"status_code_Failure : {response.status_code} , attempt is {attempt_num + 1} , url: {url}")     
-                        
+                    attempt_num += 1
+                else:
+                    attempt_num += 1
+                    
             except requests.exceptions.RequestException as e:
                 if self.log:
                     logging.error(f"Exception_Failure : exception was {e} , attempt is {attempt_num + 1}  , url: {url}")

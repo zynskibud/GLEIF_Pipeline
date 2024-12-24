@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import os
 import requests
 import re
+import psycopg2
 from selenium.webdriver.chrome.service import Service
 from selenium import webdriver
 from webdriver_manager.chrome import ChromeDriverManager
@@ -66,7 +67,7 @@ class GLEIF_Backill_Helpers:
             os.makedirs(rf"../file_lib/{str_unpacked_zip_file_path_name}", exist_ok=True)
             zip_ref.extractall(rf"../file_lib/{str_unpacked_zip_file_path_name}")
         
-        str_unpacked_zip_file_name = os.listdir(rf"../file_lib/{str_unpacked_zip_file_path_name}")[0]
+        str_unpacked_zip_file_name = os.listdir(rf"../file_lib/{str_unpacked_zip_file_path_name}")[-1]
         str_json_file_path = rf"../file_lib/{str_unpacked_zip_file_path_name}" + "//" + str_unpacked_zip_file_name
         
         return str_json_file_path
@@ -117,16 +118,61 @@ class GLEIF_Backill_Helpers:
         
         return dict_organized
 
-    def extract_other_entity_names(self , data_dict, base_keyword, exclude_keywords=None):
+    def extract_both_entity_names(self , data_dict):
         """
-        Extracts and organizes `OtherEntityNames` keys into a list of tuples.
-        Each tuple contains the `@type` and the main value for a given numeric suffix.
+        Extracts and organizes both `OtherEntityNames` and `TransliteratedOtherEntityNames` keys.
+        Returns two lists of tuples:
+        - First list for OtherEntityNames: (type, value)
+        - Second list for TransliteratedOtherEntityNames: (type, value)
+        """
+        other_grouped_data = {}
+        transliterated_grouped_data = {}
 
-        :param data_dict: Dictionary containing the raw data.
-        :param base_keyword: Common substring to identify relevant keys (e.g., "OtherEntityNames").
-        :param exclude_keywords: List of keywords to exclude (e.g., ["TranslatedOtherEntityNames"]).
-        :return: A list of tuples: (type, value) for each numeric suffix group.
-        """
+        for key, value in data_dict.items():
+            if "OtherEntityNames" in key and "TransliteratedOtherEntityNames" not in key:
+                # This is a regular OtherEntityNames key
+                match = re.search(r"_(\d+)", key)
+                if not match:
+                    continue
+                index = int(match.group(1))
+
+                if index not in other_grouped_data:
+                    other_grouped_data[index] = {"type": None, "value": None}
+
+                if "@type" in key:
+                    other_grouped_data[index]["type"] = value
+                else:
+                    other_grouped_data[index]["value"] = value
+
+            elif "TransliteratedOtherEntityNames" in key:
+                # This is a TransliteratedOtherEntityNames key
+                match = re.search(r"_(\d+)", key)
+                if not match:
+                    continue
+                index = int(match.group(1))
+
+                if index not in transliterated_grouped_data:
+                    transliterated_grouped_data[index] = {"type": None, "value": None}
+
+                if "@type" in key:
+                    transliterated_grouped_data[index]["type"] = value
+                else:
+                    transliterated_grouped_data[index]["value"] = value
+
+        # Convert grouped data into lists of tuples
+        other_result = [
+            (other_grouped_data[idx]["type"], other_grouped_data[idx]["value"])
+            for idx in sorted(other_grouped_data.keys())
+        ]
+
+        transliterated_result = [
+            (transliterated_grouped_data[idx]["type"], transliterated_grouped_data[idx]["value"])
+            for idx in sorted(transliterated_grouped_data.keys())
+        ]
+
+        return other_result, transliterated_result
+
+    """def extract_other_entity_names(self , data_dict, base_keyword, exclude_keywords=None):
         grouped_data = {}
 
         # Default empty list for exclude_keywords
@@ -158,9 +204,9 @@ class GLEIF_Backill_Helpers:
         # Convert grouped data into a list of tuples
         result = [(grouped_data[index]["type"], grouped_data[index]["value"]) for index in sorted(grouped_data.keys())]
 
-        return result
+        return result"""
 
-    def extract_event_data(self , dict_data, base_keyword, target_keys):
+    def extract_event_data(self , dict_data, base_keyword, target_keys , bool_test = False):
         """
         Extracts and organizes data for repeated keys in a dictionary based on a base keyword and target keys.
 
@@ -200,6 +246,9 @@ class GLEIF_Backill_Helpers:
             tuple_values = tuple(grouped_data[index].get(target, None) for target in target_keys)
             result.append(tuple_values)
 
+        if bool_test == True:
+            result = [list(tup) for tup in result]
+        
         return result
 
     def get_target_values(self , dict_data, target_keys, subset_string=False):
@@ -278,3 +327,41 @@ class GLEIF_Backill_Helpers:
 
         return flattened_dict
     
+    def parse_file_path(self , file_path):
+        str_filename = os.path.basename(file_path)
+        date_part, time_part = str_filename.split('-')[:2]
+        str_formatted_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:]}"
+        str_formatted_time = f"{time_part[:2]}:{time_part[2:]} UTC"
+        return str_filename, str_formatted_date, str_formatted_time
+    
+    def create_file_tracker_table(self, conn, cursor):
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS GLEIF_files_processed (
+                id SERIAL PRIMARY KEY,
+                time_interval TEXT,
+                date TEXT,
+                file_name TEXT,
+                Data_Title TEXT
+            );
+        """)
+        conn.commit()
+    
+    def insert_file_into_file_tracker(self, conn, cursor, filename, formatted_date, formatted_time, str_data_title):
+        insert_query = """
+            INSERT INTO GLEIF_files_processed (file_name, date, time_interval, Data_Title)
+            VALUES (%s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (filename, formatted_date , formatted_time, str_data_title))
+        conn.commit()
+    
+    def file_tracker(self , str_db_name , file_path , str_data_title):
+        conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
+        cursor = conn.cursor()
+
+        self.create_file_tracker_table(conn = conn , cursor = cursor)
+        
+        
+        
+        str_filename, str_formatted_date, str_formatted_time = self.parse_file_path(file_path)
+        
+        self.insert_file_into_file_tracker(conn = conn , cursor = cursor , filename = str_filename , formatted_date = str_formatted_date , formatted_time = str_formatted_time , str_data_title = str_data_title)

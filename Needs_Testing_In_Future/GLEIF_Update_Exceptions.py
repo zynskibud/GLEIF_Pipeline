@@ -5,6 +5,7 @@ import json
 import psycopg2
 import sys
 import io
+from datetime import datetime, timezone
 current_directory = os.getcwd()
 target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
 sys.path.append(target_directory)
@@ -74,6 +75,15 @@ class GLEIFUpdateExceptions:
         # Commit the transaction
         self.conn.commit()
     
+    def remove_duplicates_keep_order(self , input_list):
+        seen = set()
+        output_list = []
+        for item in input_list:
+            if item not in seen:
+                output_list.append(item)
+                seen.add(item)
+        return output_list
+    
     def process_data(self , dict_leis):
         list_tuples_exceptions = []
     
@@ -82,7 +92,7 @@ class GLEIFUpdateExceptions:
             tuple_values = self.obj_backfill_helpers.get_target_values(dict_data = dict_flat , subset_string = True , target_keys = ["LEI" , "ExceptionCategory" , "ExceptionReason"])
             list_tuples_exceptions.append(tuple(tuple_values))
             
-        list_clean_tuples_exceptions = list(set(list_tuples_exceptions))
+        list_clean_tuples_exceptions = self.remove_duplicates_keep_order(list_tuples_exceptions)
         self.bulk_insert_using_copy(data=list_clean_tuples_exceptions , table_name = "GLEIF_exception_data" , columns = ['lei', 'ExceptionCategory', 'ExceptionReason'])
         
     def storing_GLEIF_data_in_database(self):
@@ -92,8 +102,12 @@ class GLEIFUpdateExceptions:
             
         self.process_data(dict_leis = dict_leis["exceptions"])
         
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_2_exceptions")
+
+        
         self.conn.commit()
         self.conn.close()
+        
         
 
 if __name__ == "main":

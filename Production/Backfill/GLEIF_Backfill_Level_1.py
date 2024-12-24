@@ -11,7 +11,7 @@ import ijson
 
 from Production.Backfill import GLEIF_Backfill_Helpers
 
-class GLEIFLevel1Data_Rewritten:
+class GLEIFLevel1Data:
     def __init__(self , bool_log = True , str_db_name = "GLEIF_test_db" , bool_downloaded = True):
         
         self.obj_backfill_helpers = GLEIF_Backfill_Helpers.GLEIF_Backill_Helpers(bool_Level_1 = True)
@@ -32,10 +32,10 @@ class GLEIFLevel1Data_Rewritten:
                 os.makedirs("../file_lib")
                 
             str_level_1_download_link = self.obj_backfill_helpers.get_level_download_links()
-            self.str_json_file_path = self.obj_backfill_helpers.unpacking_GLEIF_zip_files(str_download_link = str_level_1_download_link , str_unpacked_zip_file_name = "Level_1_unpacked" , str_zip_file_path_name = "Level_1.zip")
-    
-        str_unpacked_zip_file_name = os.listdir(rf"../file_lib/Level_1_unpacked")[0]
-        self.str_json_file_path = rf"../file_lib/Level_1_unpacked" + "//" + str_unpacked_zip_file_name
+            self.str_json_file_path = self.obj_backfill_helpers.unpacking_GLEIF_zip_files(str_download_link = str_level_1_download_link , str_unpacked_zip_file_path_name = "Level_1_unpacked" , str_zip_file_path_name = "Level_1.zip")
+        else:
+            str_unpacked_zip_file_name = os.listdir(rf"../file_lib/Level_1_unpacked")[-1]
+            self.str_json_file_path = rf"../file_lib/Level_1_unpacked" + "//" + str_unpacked_zip_file_name
         self.conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
@@ -234,6 +234,15 @@ class GLEIFLevel1Data_Rewritten:
         self.cursor.copy_expert(copy_query, buffer)
         self.conn.commit()
         
+    def remove_duplicates_keep_order(self , input_list):
+        seen = set()
+        output_list = []
+        for item in input_list:
+            if item not in seen:
+                output_list.append(item)
+                seen.add(item)
+        return output_list
+    
     def process_entity_data(self , list_dict_records):
         list_entity_meta_data_tuples = []
         
@@ -265,13 +274,15 @@ class GLEIFLevel1Data_Rewritten:
             dict_flat = self.obj_backfill_helpers.flatten_dict(dict_record)
             dict_clean = self.obj_backfill_helpers.clean_keys(input_dict = dict_flat)
             dict_entity = (self.obj_backfill_helpers.organize_by_prefix(dict_clean))["Entity"]
-            list_output = self.obj_backfill_helpers.extract_other_entity_names(data_dict = dict_entity, base_keyword="OtherEntityNames", exclude_keywords=["TranslatedOtherEntityNames"]) 
+            #ist_output = self.obj_backfill_helpers.extract_other_entity_names(data_dict = dict_entity, base_keyword="OtherEntityNames", exclude_keywords=["TranslatedOtherEntityNames"]) 
+            #xtract_both_entity_names
+            list_output = (self.obj_backfill_helpers.extract_both_entity_names(data_dict = dict_entity))[0]
             for index, tup in enumerate(list_output):
                 list_output[index] = (dict_clean["LEI"],) + tup         
             list_other_names_tuples.extend(list_output)
-        
-        list_clean_other_names_tuples = list(set(list_other_names_tuples))
-        
+                
+        list_clean_other_names_tuples = self.remove_duplicates_keep_order(list_other_names_tuples)
+                
         self.bulk_insert_using_copy(data = list_clean_other_names_tuples , table_name = "GLEIF_other_legal_names" , columns = ["lei", "Type" , "OtherEntityNames"])        
     
     def process_legal_address(self , list_dict_records):
@@ -330,7 +341,7 @@ class GLEIFLevel1Data_Rewritten:
                 list_output[index] = (dict_clean["LEI"],) + tup 
             list_legal_entity_events_tuples.extend(list_output)
 
-        list_clean_legal_entity_events_tuples = list(set(list_legal_entity_events_tuples))
+        list_clean_legal_entity_events_tuples = self.remove_duplicates_keep_order(list_legal_entity_events_tuples)
 
         self.bulk_insert_using_copy(data = list_clean_legal_entity_events_tuples , table_name = "GLEIF_LegalEntityEvents" , 
                                 columns = ["lei",
@@ -383,11 +394,7 @@ class GLEIFLevel1Data_Rewritten:
                 list_output.insert(0 , dict_clean["LEI"])
                 list_extension_data_tuples.append(tuple(list_output))
 
-        list_clean_extension_data_tuples = list(set(list_extension_data_tuples))
-        
-        with open("output.txt", "w", encoding="utf-8") as file:
-            for item in list_clean_extension_data_tuples:
-                file.write(f"{item}\n")    
+        list_clean_extension_data_tuples = self.remove_duplicates_keep_order(list_extension_data_tuples)
                     
         self.bulk_insert_using_copy(data = list_clean_extension_data_tuples , table_name = "GLEIF_geocoding" , 
                                 columns = ["lei",
@@ -427,8 +434,10 @@ class GLEIFLevel1Data_Rewritten:
         for index , list_dict_records in enumerate(generator_batched_json):
             self.process_all_data(list_dict_records = list_dict_records)
         
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_1_meta_data")
+        
         self.conn.close()
         
 if __name__ == "main":
-    obj = GLEIFLevel1Data_Rewritten(bool_log = True)
+    obj = GLEIFLevel1Data(bool_log = True)
     obj.storing_GLEIF_data_in_database()

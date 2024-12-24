@@ -10,7 +10,7 @@ import zipfile
 import os
 from pathlib import Path
 import time
-
+from datetime import datetime, timezone
 class GLEIF_Update_Helpers:
     def __init__(self, bool_Level_1 = False, bool_Level_2_Trees = False, bool_Level_2_Reporting_Exceptions = False):
         self.bool_Level_1 = bool_Level_1
@@ -117,15 +117,23 @@ class GLEIF_Update_Helpers:
     
     def unpacking_GLEIF_zip_files(self):
         
-        str_zip_file_path = (self.find_default_download_folder_and_list_files())[0]
+        current_date_str = datetime.now(timezone.utc).strftime("%Y%m%d")  # Format: YYYYMMDD
+        current_interval = self.get_current_interval()
+        
+        list_files = self.find_default_download_folder_and_list_files()
         
         if self.bool_Level_1 == True:
             str_extract_to_directory = rf"../file_lib/Level_1_update_unpacked" # Replace with your desired extraction directory
+            str_expected_file_name = f"{current_date_str}-{current_interval}-gleif-goldencopy-lei2-intra-day.json.zip"
         if self.bool_Level_2_Trees == True:
             str_extract_to_directory = rf"../file_lib/Level_2_update_unpacked" # Replace with your desired extraction directory
+            str_expected_file_name = f"{current_date_str}-{current_interval}-gleif-goldencopy-rr-intra-day.json.zip"
         if self.bool_Level_2_Reporting_Exceptions == True:
             str_extract_to_directory = rf"../file_lib/Exceptions_update_unpacked" # Replace with your desired extraction directory
+            str_expected_file_name = f"{current_date_str}-{current_interval}-gleif-goldencopy-repex-intra-day.json"
 
+        str_zip_file_path = [file for file in list_files if str_expected_file_name in os.path.basename(file)][0]
+        
         # Extract the zip file
         with zipfile.ZipFile(str_zip_file_path, 'r') as zip_ref:
             file_names = zip_ref.namelist()  # Get the list of files in the archive
@@ -139,3 +147,20 @@ class GLEIF_Update_Helpers:
             str_json_file_path = os.path.join(str_extract_to_directory, first_file_name)
             
         return str_json_file_path
+    
+    def get_current_interval(self):
+        """
+        Determines the current interval based on the current UTC time.
+        
+        Returns:
+            str: The interval string ('0000', '0800', '1600').
+        """
+        now_utc = datetime.now(timezone.utc)
+        current_hour = now_utc.hour
+        
+        if 2 <= current_hour < 10:
+            return "0000"
+        elif 10 <= current_hour < 18:
+            return "0800"
+        else:
+            return "1600"

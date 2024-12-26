@@ -1,0 +1,4 @@
+DEBUG: Starting new HTTPS connection (1): api.gleif.org:443
+DEBUG: https://api.gleif.org:443 "GET /api/v1/lei-records/894500I4OHSN9PRCKY08/ultimate-parent-relationship HTTP/11" 200 None
+DEBUG: Starting new HTTPS connection (1): api.gleif.org:443
+DEBUG: https://api.gleif.org:443 "GET /api/v1/lei-records/001GPB6A9XPE8XJICC14/direct-parent-relationship HTTP/11" 404 None

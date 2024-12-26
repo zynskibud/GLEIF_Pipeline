@@ -1,25 +1,11 @@
 import os
 import logging
+import json
+import json
+import psycopg2
+import sys
+import io
 from datetime import datetime, timezone
-import json
-import json
-import psycopg2
-import sys
-import io
-current_directory = os.getcwd()
-target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
-sys.path.append(target_directory)
-
-from Production.Update import GLEIF_Update_Helpers
-from Production.Backfill import GLEIF_Backfill_Helpers
-
-import os
-import logging
-import json
-import json
-import psycopg2
-import sys
-import io
 current_directory = os.getcwd()
 target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
 sys.path.append(target_directory)
@@ -45,11 +31,12 @@ class GLEIFUpdateLevel2:
         if not bool_downloaded:
             if not os.path.exists("../file_lib"):
                 os.makedirs("../file_lib")
-                
             self.obj_update_helpers.download_on_machine()
             self.str_json_file_path = self.obj_update_helpers.unpacking_GLEIF_zip_files()
-    
-        self.str_json_file_path = '../file_lib/Level_2_update_unpacked\\20241129-1600-gleif-goldencopy-rr-intra-day.json'
+        else:   
+            current_date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+            current_interval = self.obj_update_helpers.get_current_interval()
+            self.str_json_file_path = f'../file_lib/Level_2_update_unpacked\\{current_date_str}-{current_interval}-gleif-goldencopy-rr-intra-day.json'
         self.conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
         self.cursor = self.conn.cursor()
         
@@ -331,7 +318,7 @@ class GLEIFUpdateLevel2:
         
         self.conn.commit()
         
-        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_2_Relationships")
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_2_relationships")
         
         self.conn.close()
         

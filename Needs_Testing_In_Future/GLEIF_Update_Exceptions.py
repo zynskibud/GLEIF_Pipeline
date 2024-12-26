@@ -31,11 +31,13 @@ class GLEIFUpdateExceptions:
         if not bool_downloaded:
             if not os.path.exists("../file_lib"):
                 os.makedirs("../file_lib")
-                
+              
             self.obj_update_helpers.download_on_machine()
             self.str_json_file_path = self.obj_update_helpers.unpacking_GLEIF_zip_files()
-    
-        self.str_json_file_path = '../file_lib/Exceptions_update_unpacked\\20241130-0000-gleif-goldencopy-repex-intra-day.json'
+        else:
+            current_date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+            current_interval = self.obj_update_helpers.get_current_interval()
+            self.str_json_file_path = f'../file_lib/Exceptions_update_unpacked\\{current_date_str}-{current_interval}-gleif-goldencopy-repex-intra-day.json'
         self.conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
         self.cursor = self.conn.cursor()
         

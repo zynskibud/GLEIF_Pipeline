@@ -3,22 +3,7 @@ import logging
 import json
 import json
 import psycopg2
-import sys
-import io
-import re
 from datetime import datetime, timezone
-current_directory = os.getcwd()
-target_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
-sys.path.append(target_directory)
-
-from Production.Update import GLEIF_Update_Helpers
-from Production.Backfill import GLEIF_Backfill_Helpers
-
-import os
-import logging
-import json
-import json
-import psycopg2
 import sys
 import io
 import re
@@ -50,8 +35,10 @@ class GLEIFUpdateLevel1:
                 
             self.obj_update_helpers.download_on_machine()
             self.str_json_file_path = self.obj_update_helpers.unpacking_GLEIF_zip_files()
-    
-        self.str_json_file_path = '../file_lib/Level_1_update_unpacked\\20241130-0000-gleif-goldencopy-lei2-intra-day.json'
+        else:
+            current_date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+            current_interval = self.obj_update_helpers.get_current_interval()
+            self.str_json_file_path = f'../file_lib/Level_1_update_unpacked\\{current_date_str}-{current_interval}-gleif-goldencopy-lei2-intra-day.json'
         self.conn = psycopg2.connect(dbname = str_db_name, user="Matthew_Pisinski", password="matt1", host="localhost", port="5432")    
         #self.conn.autocommit = True
         self.cursor = self.conn.cursor()
@@ -207,7 +194,8 @@ class GLEIFUpdateLevel1:
             dict_flat = self.obj_backfill_helpers.flatten_dict(dict_record)
             dict_clean = self.obj_backfill_helpers.clean_keys(input_dict = dict_flat)
             dict_entity = (self.obj_backfill_helpers.organize_by_prefix(dict_clean))["Entity"]
-            list_output = self.obj_backfill_helpers.extract_other_entity_names(data_dict = dict_entity, base_keyword="OtherEntityNames", exclude_keywords=["TranslatedOtherEntityNames"]) 
+            list_output = self.obj_backfill_helpers.extract_both_entity_names(data_dict = dict_entity) 
+            list_output = (self.obj_backfill_helpers.extract_both_entity_names(data_dict = dict_entity))[0]
             for index, tup in enumerate(list_output):
                 list_output[index] = (dict_clean["LEI"],) + tup         
             list_other_names_tuples.extend(list_output)
@@ -470,11 +458,10 @@ class GLEIFUpdateLevel1:
             self.process_all_data(list_dict_records = dict_relationships["records"])               
         self.conn.commit()
         
-        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_1_meta_data")
-        
         self.conn.close()
         
-        
+        self.obj_backfill_helpers.file_tracker(file_path = self.str_json_file_path , str_db_name = "GLEIF_test_db" , str_data_title = "Level_1_meta_data")
+         
 if __name__ == "main":
     obj = GLEIFUpdateLevel1(bool_log = True)
     obj.storing_GLEIF_data_in_database()
